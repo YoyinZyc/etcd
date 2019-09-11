@@ -119,7 +119,7 @@ func (a *applierV3backend) Apply(r *pb.InternalRaftRequest) *applyResult {
 	// call into a.s.applyV3.F instead of a.F so upper appliers can check individual calls
 	switch {
 	case r.Range != nil:
-		ar.resp, ar.err = a.s.applyV3.Range(nil, nil, r.Range)
+		ar.resp, ar.err = a.s.applyV3.Range(context.TODO(), nil, r.Range)
 	case r.Put != nil:
 		ar.resp, ar.err = a.s.applyV3.Put(nil, r.Put)
 	case r.DeleteRange != nil:
@@ -517,7 +517,7 @@ func (a *applierV3backend) applyTxn(txn mvcc.TxnWrite, rt *pb.TxnRequest, txnPat
 		respi := tresp.Responses[i].Response
 		switch tv := req.Request.(type) {
 		case *pb.RequestOp_RequestRange:
-			resp, err := a.Range(nil, txn, tv.RequestRange)
+			resp, err := a.Range(context.TODO(), txn, tv.RequestRange)
 			if err != nil {
 				if lg != nil {
 					lg.Panic("unexpected error during txn", zap.Error(err))
