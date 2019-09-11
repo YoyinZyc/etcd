@@ -26,6 +26,7 @@ import (
 	"go.etcd.io/etcd/lease"
 	"go.etcd.io/etcd/mvcc"
 	"go.etcd.io/etcd/mvcc/mvccpb"
+	"go.etcd.io/etcd/pkg/traceutil"
 	"go.etcd.io/etcd/pkg/types"
 
 	"github.com/gogo/protobuf/proto"
@@ -246,6 +247,11 @@ func (a *applierV3backend) DeleteRange(txn mvcc.TxnWrite, dr *pb.DeleteRangeRequ
 }
 
 func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.RangeRequest) (*pb.RangeResponse, error) {
+	trace := ctx.Value("trace").(*traceutil.Trace)
+	if trace == nil {
+		trace = traceutil.New("Apply Range")
+		ctx = context.WithValue(ctx, "trace", trace)
+	}
 
 	resp := &pb.RangeResponse{}
 	resp.Header = &pb.ResponseHeader{}
@@ -274,6 +280,7 @@ func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.Ra
 	}
 
 	rr, err := txn.Range(r.Key, mkGteRange(r.RangeEnd), ro)
+	trace.Step("Get value from backend.")
 	if err != nil {
 		return nil, err
 	}
@@ -338,6 +345,7 @@ func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.Ra
 		}
 		resp.Kvs[i] = &rr.KVs[i]
 	}
+	trace.Step("Filter and sort the result.")
 	return resp, nil
 }
 

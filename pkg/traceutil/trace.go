@@ -28,7 +28,7 @@ func New(op string) *Trace {
 	return &Trace{operation: op, startTime: time.Now()}
 }
 
-func (t *Trace) AddStep(msg string) {
+func (t *Trace) Step(msg string) {
 	t.steps = append(t.steps, step{time: time.Now(), msg: msg})
 }
 
