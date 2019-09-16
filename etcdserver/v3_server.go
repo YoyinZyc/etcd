@@ -564,7 +564,7 @@ func (s *EtcdServer) doSerialize(ctx context.Context, chk func(*auth.AuthInfo) e
 		return err
 	}
 
-	if trace := ctx.Value("trace").(*traceutil.Trace); trace != nil {
+	if trace, ok := ctx.Value("trace").(*traceutil.Trace); ok && trace != nil {
 		trace.Step("Authentication.")
 	}
 	// fetch response for serialized request
