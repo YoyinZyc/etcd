@@ -257,7 +257,7 @@ func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.Ra
 	resp.Header = &pb.ResponseHeader{}
 
 	if txn == nil {
-		txn = a.s.kv.Read()
+		txn = a.s.kv.Read(trace)
 		defer txn.End()
 	}
 
@@ -351,7 +351,8 @@ func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.Ra
 
 func (a *applierV3backend) Txn(rt *pb.TxnRequest) (*pb.TxnResponse, error) {
 	isWrite := !isTxnReadonly(rt)
-	txn := mvcc.NewReadOnlyTxnWrite(a.s.KV().Read())
+	trace := traceutil.New("ReadOnlyTxn")
+	txn := mvcc.NewReadOnlyTxnWrite(a.s.KV().Read(trace))
 
 	txnPath := compareToPath(txn, rt)
 	if isWrite {
