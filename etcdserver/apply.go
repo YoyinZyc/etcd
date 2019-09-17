@@ -280,7 +280,6 @@ func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.Ra
 	}
 
 	rr, err := txn.Range(r.Key, mkGteRange(r.RangeEnd), ro)
-	trace.Step("Get value from backend.")
 	if err != nil {
 		return nil, err
 	}
