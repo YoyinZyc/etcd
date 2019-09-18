@@ -32,7 +32,7 @@ func (t *Trace) Step(msg string) {
 	t.steps = append(t.steps, step{time: time.Now(), msg: msg})
 }
 
-// Dump all steps in the Trace
+// Log dumps all steps in the Trace
 func (t *Trace) Log(lg *zap.Logger) {
 
 	var buf bytes.Buffer
