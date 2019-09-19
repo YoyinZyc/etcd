@@ -34,7 +34,8 @@ import (
 )
 
 const (
-	warnApplyDuration = 100 * time.Millisecond
+	warnApplyDuration   = 100 * time.Millisecond
+	rangeTraceThreshold = 100 * time.Millisecond
 )
 
 type applyResult struct {
@@ -247,11 +248,7 @@ func (a *applierV3backend) DeleteRange(txn mvcc.TxnWrite, dr *pb.DeleteRangeRequ
 }
 
 func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.RangeRequest) (*pb.RangeResponse, error) {
-	trace, ok := ctx.Value("trace").(*traceutil.Trace)
-	if !ok || trace == nil {
-		trace = traceutil.New("Apply Range")
-		ctx = context.WithValue(ctx, "trace", trace)
-	}
+	ctx, trace := traceutil.GetOrCreate(ctx, "Apply Range")
 
 	resp := &pb.RangeResponse{}
 	resp.Header = &pb.ResponseHeader{}

@@ -92,7 +92,8 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 	var resp *pb.RangeResponse
 	var err error
 	defer func(start time.Time) {
-		warnOfExpensiveReadOnlyRangeRequest(s.getLogger(), trace, start, r, resp, err)
+		warnOfExpensiveReadOnlyRangeRequest(s.getLogger(), start, r, resp, err)
+		trace.LogIfLong(rangeTraceThreshold, s.getLogger())
 	}(time.Now())
 
 	if !r.Serializable {
@@ -564,7 +565,7 @@ func (s *EtcdServer) doSerialize(ctx context.Context, chk func(*auth.AuthInfo) e
 		return err
 	}
 
-	if trace, ok := ctx.Value("trace").(*traceutil.Trace); ok && trace != nil {
+	if trace := traceutil.Get(ctx); trace != nil {
 		trace.Step("Authentication.")
 	}
 	// fetch response for serialized request
