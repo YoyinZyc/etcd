@@ -56,13 +56,13 @@ func (t *Trace) Log(lg *zap.Logger) {
 	var buf bytes.Buffer
 	traceNum := rand.Int31()
 
-	buf.WriteString(fmt.Sprintf("Trace[%d] \"%v\" (duration: %v, start: ", traceNum, t.operation, totalDuration))
-	buf.WriteString(t.startTime.Format("2006-01-02 15:04:05"))
-	buf.WriteString(fmt.Sprintf(".%06d", t.startTime.Nanosecond()/1000))
-	buf.WriteString(")\n")
+	buf.WriteString(fmt.Sprintf("Trace[%d] \"%v\" (duration: %v, start: %v)\n",
+		traceNum, t.operation, totalDuration,
+		t.startTime.Format("2006-01-02 15:04:05.000")))
 	lastStepTime := t.startTime
 	for _, step := range t.steps {
-		buf.WriteString(fmt.Sprintf("Trace[%d] Step \"%v\" (duration: %v)\n", traceNum, step.msg, step.time.Sub(lastStepTime)))
+		buf.WriteString(fmt.Sprintf("Trace[%d] Step \"%v\" (duration: %v)\n",
+			traceNum, step.msg, step.time.Sub(lastStepTime)))
 		lastStepTime = step.time
 	}
 	buf.WriteString(fmt.Sprintf("Trace[%d] End\n", traceNum))
