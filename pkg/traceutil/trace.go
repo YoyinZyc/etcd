@@ -55,13 +55,15 @@ func (t *Trace) Log(lg *zap.Logger) {
 	t.LogWithStepThreshold(0, lg)
 }
 
+// LogIfLong dumps logs if the duration is longer than threshold
 func (t *Trace) LogIfLong(threshold time.Duration, lg *zap.Logger) {
 	if time.Since(t.startTime) > threshold {
-		stepThreshold := threshold / time.Duration(len(t.steps))
+		stepThreshold := threshold / time.Duration(len(t.steps)+1)
 		t.LogWithStepThreshold(stepThreshold, lg)
 	}
 }
 
+// LogWithStepThreshold only dumps step whose duration is longer than step threshold
 func (t *Trace) LogWithStepThreshold(threshold time.Duration, lg *zap.Logger) {
 	endTime := time.Now()
 	totalDuration := endTime.Sub(t.startTime)
