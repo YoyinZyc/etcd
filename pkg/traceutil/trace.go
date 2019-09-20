@@ -52,7 +52,19 @@ func (t *Trace) Step(msg string) {
 
 // Log dumps all steps in the Trace
 func (t *Trace) Log(lg *zap.Logger) {
-	totalDuration := time.Since(t.startTime)
+	t.LogWithStepThreshold(0, lg)
+}
+
+func (t *Trace) LogIfLong(threshold time.Duration, lg *zap.Logger) {
+	if time.Since(t.startTime) > threshold {
+		stepThreshold := threshold / time.Duration(len(t.steps))
+		t.LogWithStepThreshold(stepThreshold, lg)
+	}
+}
+
+func (t *Trace) LogWithStepThreshold(threshold time.Duration, lg *zap.Logger) {
+	endTime := time.Now()
+	totalDuration := endTime.Sub(t.startTime)
 	var buf bytes.Buffer
 	traceNum := rand.Int31()
 
@@ -61,22 +73,20 @@ func (t *Trace) Log(lg *zap.Logger) {
 		t.startTime.Format("2006-01-02 15:04:05.000")))
 	lastStepTime := t.startTime
 	for _, step := range t.steps {
-		buf.WriteString(fmt.Sprintf("Trace[%d] Step \"%v\" (duration: %v)\n",
-			traceNum, step.msg, step.time.Sub(lastStepTime)))
+		stepDuration := step.time.Sub(lastStepTime)
+		if stepDuration > threshold {
+			buf.WriteString(fmt.Sprintf("Trace[%d] Step \"%v\" (duration: %v)\n",
+				traceNum, step.msg, stepDuration))
+		}
 		lastStepTime = step.time
 	}
-	buf.WriteString(fmt.Sprintf("Trace[%d] End\n", traceNum))
+	buf.WriteString(fmt.Sprintf("Trace[%d] End %v\n", traceNum,
+		endTime.Format("2006-01-02 15:04:05.000")))
 
 	s := buf.String()
 	if lg != nil {
 		lg.Info(s)
 	} else {
 		plog.Info(s)
-	}
-}
-
-func (t *Trace) LogIfLong(threshold time.Duration, lg *zap.Logger) {
-	if time.Since(t.startTime) > threshold {
-		t.Log(lg)
 	}
 }
