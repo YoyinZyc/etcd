@@ -248,7 +248,7 @@ func (a *applierV3backend) DeleteRange(txn mvcc.TxnWrite, dr *pb.DeleteRangeRequ
 }
 
 func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.RangeRequest) (*pb.RangeResponse, error) {
-	ctx, trace := traceutil.GetOrCreate(ctx, "Apply Range")
+	trace := traceutil.Get(ctx)
 
 	resp := &pb.RangeResponse{}
 	resp.Header = &pb.ResponseHeader{}
@@ -347,8 +347,7 @@ func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.Ra
 
 func (a *applierV3backend) Txn(rt *pb.TxnRequest) (*pb.TxnResponse, error) {
 	isWrite := !isTxnReadonly(rt)
-	trace := traceutil.New("ReadOnlyTxn")
-	txn := mvcc.NewReadOnlyTxnWrite(a.s.KV().Read(trace))
+	txn := mvcc.NewReadOnlyTxnWrite(a.s.KV().Read(traceutil.TODO()))
 
 	txnPath := compareToPath(txn, rt)
 	if isWrite {
