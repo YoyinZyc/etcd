@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ func TestGet(t *testing.T) {
 		{
 			name:        "When the context does not have trace",
 			inputCtx:    context.TODO(),
-			outputTrace: nil,
+			outputTrace: TODO(),
 		},
 		{
 			name:        "When the context has trace",
@@ -36,8 +37,11 @@ func TestGet(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			trace := Get(tt.inputCtx)
-			if trace != tt.outputTrace {
-				t.Errorf("Expected %v Got %v", tt.outputTrace, trace)
+			if trace == nil {
+				t.Errorf("Expected %v; Got nil\n", tt.outputTrace)
+			}
+			if trace.operation != tt.outputTrace.operation {
+				t.Errorf("Expected %v; Got %v\n", tt.outputTrace, trace)
 			}
 		})
 	}
@@ -65,110 +69,186 @@ func TestGetOrCreate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, trace := GetOrCreate(tt.inputCtx, "test")
 			if trace == nil {
-				t.Errorf("Expected trace object Got nil")
+				t.Errorf("Expected trace object; Got nil\n")
 			} else if trace.operation != tt.outputTraceOp {
-				t.Errorf("Expected %v Got %v", tt.outputTraceOp, trace.operation)
+				t.Errorf("Expected %v; Got %v\n", tt.outputTraceOp, trace.operation)
 			}
 			if ctx.Value("trace") == nil {
-				t.Errorf("Expected context has attached trace Got nil")
+				t.Errorf("Expected context has attached trace; Got nil\n")
 			}
 		})
 	}
 }
 
-func TestStep(t *testing.T) {
+func TestCreate(t *testing.T) {
 	var (
-		op    = "Test"
-		steps = []string{"Step1, Step2"}
+		op     = "Test"
+		steps  = []string{"Step1, Step2"}
+		fields = []Field{
+			{"traceKey1", "traceValue1"},
+			{"traceKey2", "traceValue2"},
+		}
+		stepFields = []Field{
+			{"stepKey1", "stepValue2"},
+			{"stepKey2", "stepValue2"},
+		}
 	)
 
-	trace := New(op)
+	trace := New(op, fields[0], fields[1])
 	if trace.operation != op {
-		t.Errorf("Expected %v, got %v\n", op, trace.operation)
+		t.Errorf("Expected %v; Got %v\n", op, trace.operation)
 	}
-
-	for _, v := range steps {
-		trace.Step(v)
-		trace.Step(v)
+	for i, f := range trace.fields {
+		if f.Key != fields[i].Key {
+			t.Errorf("Expected %v; Got %v\n", fields[i].Key, f.Key)
+		}
+		if f.Value != fields[i].Value {
+			t.Errorf("Expected %v; Got %v\n", fields[i].Value, f.Value)
+		}
 	}
 
 	for i, v := range steps {
-		if v != trace.steps[i].msg {
-			t.Errorf("Expected %v, got %v\n.", v, trace.steps[i].msg)
+		trace.Step(v, stepFields[i])
+	}
+
+	for i, v := range trace.steps {
+		if steps[i] != v.msg {
+			t.Errorf("Expected %v, got %v\n.", steps[i], v.msg)
+		}
+		if stepFields[i].Key != v.fields[0].Key {
+			t.Errorf("Expected %v; Got %v\n", stepFields[i].Key, v.fields[0].Key)
+		}
+		if stepFields[i].Value != v.fields[0].Value {
+			t.Errorf("Expected %v; Got %v\n", stepFields[i].Value, v.fields[0].Value)
 		}
 	}
 }
 
 func TestLog(t *testing.T) {
-	tests := []struct {
+	test := struct {
 		name        string
 		trace       *Trace
 		expectedMsg []string
 	}{
+		name: "When dump all logs",
+		trace: &Trace{
+			operation: "Test",
+			startTime: time.Now().Add(-100 * time.Millisecond),
+			steps: []step{
+				{time: time.Now().Add(-80 * time.Millisecond), msg: "msg1"},
+				{time: time.Now().Add(-50 * time.Millisecond), msg: "msg2"},
+			},
+		},
+		expectedMsg: []string{
+			"msg1", "msg2",
+		},
+	}
+
+	t.Run(test.name, func(t *testing.T) {
+		logPath := filepath.Join(os.TempDir(), fmt.Sprintf("test-log-%d", time.Now().UnixNano()))
+		defer os.RemoveAll(logPath)
+
+		lcfg := zap.NewProductionConfig()
+		lcfg.OutputPaths = []string{logPath}
+		lcfg.ErrorOutputPaths = []string{logPath}
+		lg, _ := lcfg.Build()
+
+		test.trace.Log(lg)
+		data, err := ioutil.ReadFile(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for _, msg := range test.expectedMsg {
+			if !bytes.Contains(data, []byte(msg)) {
+				t.Errorf("Expected to find %v in log.\n", msg)
+			}
+		}
+	})
+}
+
+func TestTraceFormat(t *testing.T) {
+	tests := []struct {
+		name        string
+		trace       *Trace
+		fields      []Field
+		expectedMsg []string
+	}{
 		{
-			name: "When dump all logs",
+			name: "When trace has fields",
 			trace: &Trace{
 				operation: "Test",
 				startTime: time.Now().Add(-100 * time.Millisecond),
 				steps: []step{
-					{time.Now().Add(-80 * time.Millisecond), "msg1"},
-					{time.Now().Add(-50 * time.Millisecond), "msg2"},
+					{
+						time:   time.Now().Add(-80 * time.Millisecond),
+						msg:    "msg1",
+						fields: []Field{{"stepKey1", "stepValue1"}},
+					},
+					{
+						time:   time.Now().Add(-50 * time.Millisecond),
+						msg:    "msg2",
+						fields: []Field{{"stepKey2", "stepValue2"}},
+					},
 				},
 			},
+			fields: []Field{
+				{"traceKey1", "traceValue1"},
+				{"count", 1},
+			},
 			expectedMsg: []string{
+				"Test",
 				"msg1", "msg2",
+				"traceKey1:traceValue1", "count:1",
+				"stepKey1:stepValue1", "stepKey2:stepValue2",
 			},
 		},
 		{
-			name: "Check formatting",
+			name: "When trace has no field",
 			trace: &Trace{
 				operation: "Test",
 				startTime: time.Now().Add(-100 * time.Millisecond),
 				steps: []step{
-					{time.Now(), "msg1"},
+					{time: time.Now().Add(-80 * time.Millisecond), msg: "msg1"},
+					{time: time.Now().Add(-50 * time.Millisecond), msg: "msg2"},
 				},
 			},
-			expectedMsg: []string{},
+			fields: []Field{},
+			expectedMsg: []string{
+				"Test",
+				"msg1", "msg2",
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			logPath := filepath.Join(os.TempDir(), fmt.Sprintf("test-log-%d", time.Now().UnixNano()))
-			defer os.RemoveAll(logPath)
-
-			lcfg := zap.NewProductionConfig()
-			lcfg.OutputPaths = []string{logPath}
-			lcfg.ErrorOutputPaths = []string{logPath}
-			lg, _ := lcfg.Build()
-
-			tt.trace.Log(lg)
-			data, err := ioutil.ReadFile(logPath)
-			if err != nil {
-				t.Fatal(err)
+			for _, f := range tt.fields {
+				tt.trace.AddField(f)
 			}
-			if len(tt.expectedMsg) > 0 {
-				for _, msg := range tt.expectedMsg {
-					if !bytes.Contains(data, []byte(msg)) {
-						t.Errorf("Expected %v, Got nothing", msg)
-					}
-				}
-			} else {
-				pattern := `(.+)Trace\[(\d*)?\](.+)\(duration(.+)start(.+)\)\\n` +
-					`Trace\[(\d*)?\](.+)Step(.+)\(duration(.+)\)\\n` +
-					`Trace\[(\d*)?\](.+)End(.+)\\n(.+)`
-				r, _ := regexp.Compile(pattern)
-				if !r.MatchString(string(data)) {
-					t.Errorf("Wrong log format.")
+			s := tt.trace.format(0)
+			var buf bytes.Buffer
+			buf.WriteString(`Trace\[(\d*)?\](.+)\(duration(.+)start(.+)\)\n`)
+			for range tt.trace.steps {
+				buf.WriteString(`Trace\[(\d*)?\](.+)Step(.+)\(duration(.+)\)\n`)
+			}
+			buf.WriteString(`Trace\[(\d*)?\](.+)End(.+)\n`)
+			pattern := buf.String()
+
+			r, _ := regexp.Compile(pattern)
+			if !r.MatchString(s) {
+				t.Errorf("Wrong log format.\n")
+			}
+			for _, msg := range tt.expectedMsg {
+				if !strings.Contains(s, msg) {
+					t.Errorf("Expected to find %v in log.\n", msg)
 				}
 			}
-
 		})
 	}
 }
 
 func TestLogIfLong(t *testing.T) {
-
 	tests := []struct {
 		name        string
 		threshold   time.Duration
@@ -182,8 +262,8 @@ func TestLogIfLong(t *testing.T) {
 				operation: "Test",
 				startTime: time.Now().Add(-100 * time.Millisecond),
 				steps: []step{
-					{time.Now().Add(-50 * time.Millisecond), "msg1"},
-					{time.Now(), "msg2"},
+					{time: time.Now().Add(-50 * time.Millisecond), msg: "msg1"},
+					{time: time.Now(), msg: "msg2"},
 				},
 			},
 			expectedMsg: []string{},
@@ -195,8 +275,8 @@ func TestLogIfLong(t *testing.T) {
 				operation: "Test",
 				startTime: time.Now().Add(-100 * time.Millisecond),
 				steps: []step{
-					{time.Now().Add(-50 * time.Millisecond), "msg1"},
-					{time.Now(), "msg2"},
+					{time: time.Now().Add(-50 * time.Millisecond), msg: "msg1"},
+					{time: time.Now(), msg: "msg2"},
 				},
 			},
 			expectedMsg: []string{
@@ -210,8 +290,8 @@ func TestLogIfLong(t *testing.T) {
 				operation: "Test",
 				startTime: time.Now().Add(-100 * time.Millisecond),
 				steps: []step{
-					{time.Now(), "msg1"},
-					{time.Now(), "msg2"},
+					{time: time.Now(), msg: "msg1"},
+					{time: time.Now(), msg: "msg2"},
 				},
 			},
 			expectedMsg: []string{
@@ -237,7 +317,7 @@ func TestLogIfLong(t *testing.T) {
 			}
 			for _, msg := range tt.expectedMsg {
 				if !bytes.Contains(data, []byte(msg)) {
-					t.Errorf("Expected %v, Got nothing", msg)
+					t.Errorf("Expected to find %v in log\n", msg)
 				}
 			}
 		})
