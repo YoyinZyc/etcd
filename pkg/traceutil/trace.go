@@ -30,6 +30,11 @@ func New(op string) *Trace {
 	return &Trace{operation: op, startTime: time.Now()}
 }
 
+// traceutil.TODO() returns a non-nil, empty Trace
+func TODO() *Trace {
+	return &Trace{}
+}
+
 func Get(ctx context.Context) *Trace {
 	if trace, ok := ctx.Value("trace").(*Trace); ok && trace != nil {
 		return trace
