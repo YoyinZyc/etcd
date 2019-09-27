@@ -122,8 +122,14 @@ func (tr *storeTxnRead) rangeKeys(key, end []byte, curRev int64, ro RangeOptions
 	if rev < tr.s.compactMainRev {
 		return &RangeResult{KVs: nil, Count: -1, Rev: 0}, ErrCompacted
 	}
+	limit := int(ro.Limit)
+	var revpairs []revision
+	if limit <= 0 {
+		revpairs = tr.s.kvindex.Revisions(key, end, rev)
+	} else if ro.NoCount {
+		revpairs = tr.s.kvindex.RevisionsWithLimit(key, end, rev, limit)
+	}
 
-	revpairs := tr.s.kvindex.Revisions(key, end, rev)
 	if len(revpairs) == 0 {
 		return &RangeResult{KVs: nil, Count: 0, Rev: curRev}, nil
 	}
@@ -131,11 +137,9 @@ func (tr *storeTxnRead) rangeKeys(key, end []byte, curRev int64, ro RangeOptions
 		return &RangeResult{KVs: nil, Count: len(revpairs), Rev: curRev}, nil
 	}
 
-	limit := int(ro.Limit)
 	if limit <= 0 || limit > len(revpairs) {
 		limit = len(revpairs)
 	}
-
 	kvs := make([]mvccpb.KeyValue, limit)
 	revBytes := newRevBytes()
 	for i, revpair := range revpairs[:len(kvs)] {

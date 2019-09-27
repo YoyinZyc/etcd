@@ -448,6 +448,8 @@ message RangeRequest {
   // max_create_revision is the upper bound for returned key create revisions; all keys with
   // greater create revisions will be filtered away.
   int64 max_create_revision = 13;
+
+  bool no_count = 14;
 }
 
 message RangeResponse {

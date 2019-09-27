@@ -267,9 +267,10 @@ func (a *applierV3backend) Range(txn mvcc.TxnRead, r *pb.RangeRequest) (*pb.Rang
 	}
 
 	ro := mvcc.RangeOptions{
-		Limit: limit,
-		Rev:   r.Revision,
-		Count: r.CountOnly,
+		Limit:   limit,
+		Rev:     r.Revision,
+		Count:   r.CountOnly,
+		NoCount: r.NoCount,
 	}
 
 	rr, err := txn.Range(r.Key, mkGteRange(r.RangeEnd), ro)

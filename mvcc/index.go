@@ -26,6 +26,7 @@ type index interface {
 	Get(key []byte, atRev int64) (rev, created revision, ver int64, err error)
 	Range(key, end []byte, atRev int64) ([][]byte, []revision)
 	Revisions(key, end []byte, atRev int64) []revision
+	RevisionsWithLimit(key, end []byte, atRev int64, limit int) []revision
 	Put(key []byte, rev revision)
 	Tombstone(key []byte, rev revision) error
 	RangeSince(key, end []byte, rev int64) []revision
@@ -102,7 +103,34 @@ func (ti *treeIndex) visit(key, end []byte, f func(ki *keyIndex)) {
 		return true
 	})
 }
+func (ti *treeIndex) RevisionsWithLimit(key, end []byte, atRev int64, limit int) (revs []revision) {
+	// if the request for single key
+	if end == nil {
+		rev, _, _, err := ti.Get(key, atRev)
+		if err != nil {
+			return nil
+		}
+		return []revision{rev}
+	}
+	keyi, endi := &keyIndex{key: key}, &keyIndex{key: end}
+	f := func(ki *keyIndex) {
+		if rev, _, _, err := ki.get(ti.lg, atRev); err == nil {
+			revs = append(revs, rev)
+		}
+	}
 
+	ti.RLock()
+
+	ti.tree.AscendGreaterOrEqual(keyi, func(item btree.Item) bool {
+		if (len(endi.key) > 0 && !item.Less(endi)) || len(revs) >= limit {
+			return false
+		}
+		f(item.(*keyIndex))
+		return true
+	})
+	ti.RUnlock()
+	return revs
+}
 func (ti *treeIndex) Revisions(key, end []byte, atRev int64) (revs []revision) {
 	if end == nil {
 		rev, _, _, err := ti.Get(key, atRev)

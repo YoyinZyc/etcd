@@ -40,6 +40,7 @@ type Op struct {
 	serializable bool
 	keysOnly     bool
 	countOnly    bool
+	noCount      bool
 	minModRev    int64
 	maxModRev    int64
 	minCreateRev int64
@@ -158,6 +159,7 @@ func (op Op) toRangeRequest() *pb.RangeRequest {
 		MaxModRevision:    op.maxModRev,
 		MinCreateRevision: op.minCreateRev,
 		MaxCreateRevision: op.maxCreateRev,
+		NoCount:           op.noCount,
 	}
 	if op.sort != nil {
 		r.SortOrder = pb.RangeRequest_SortOrder(op.sort.Order)
@@ -425,6 +427,10 @@ func WithKeysOnly() OpOption {
 // WithCountOnly makes the 'Get' request return only the count of keys.
 func WithCountOnly() OpOption {
 	return func(op *Op) { op.countOnly = true }
+}
+
+func WithNoCount() OpOption {
+	return func(op *Op) { op.noCount = true }
 }
 
 // WithMinModRev filters out keys for Get with modification revisions less than the given revision.

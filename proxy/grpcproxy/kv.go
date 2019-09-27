@@ -185,6 +185,9 @@ func RangeRequestToOp(r *pb.RangeRequest) clientv3.Op {
 	if r.Serializable {
 		opts = append(opts, clientv3.WithSerializable())
 	}
+	if r.NoCount {
+		opts = append(opts, clientv3.WithNoCount())
+	}
 
 	return clientv3.OpGet(string(r.Key), opts...)
 }

@@ -32,6 +32,7 @@ var (
 	getRev         int64
 	getKeysOnly    bool
 	printValueOnly bool
+	noCount        bool
 )
 
 // NewGetCommand returns the cobra command for "get".
@@ -51,6 +52,7 @@ func NewGetCommand() *cobra.Command {
 	cmd.Flags().Int64Var(&getRev, "rev", 0, "Specify the kv revision")
 	cmd.Flags().BoolVar(&getKeysOnly, "keys-only", false, "Get only the keys")
 	cmd.Flags().BoolVar(&printValueOnly, "print-value-only", false, `Only write values when using the "simple" output format`)
+	cmd.Flags().BoolVar(&noCount, "no-count", false, "Get keys without the count in response")
 	return cmd
 }
 
@@ -157,6 +159,10 @@ func getGetOp(args []string) (string, []clientv3.OpOption) {
 
 	if getKeysOnly {
 		opts = append(opts, clientv3.WithKeysOnly())
+	}
+
+	if noCount {
+		opts = append(opts, clientv3.WithNoCount())
 	}
 
 	return key, opts
