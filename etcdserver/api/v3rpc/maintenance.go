@@ -19,8 +19,10 @@ import (
 	"crypto/sha256"
 	"io"
 
+	"github.com/coreos/go-semver/semver"
 	"go.etcd.io/etcd/auth"
 	"go.etcd.io/etcd/etcdserver"
+	"go.etcd.io/etcd/etcdserver/api/membership"
 	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
 	pb "go.etcd.io/etcd/etcdserver/etcdserverpb"
 	"go.etcd.io/etcd/mvcc"
@@ -57,6 +59,7 @@ type AuthGetter interface {
 
 type ClusterStatusGetter interface {
 	IsLearner() bool
+	ClusterVersion() *semver.Version
 }
 
 type maintenanceServer struct {
@@ -206,6 +209,26 @@ func (ms *maintenanceServer) MoveLeader(ctx context.Context, tr *pb.MoveLeaderRe
 	return &pb.MoveLeaderResponse{}, nil
 }
 
+func (ms *maintenanceServer) Downgrade(ctx context.Context, r *pb.DowngradeRequest) (*pb.DowngradeResponse, error) {
+	cv := ms.cs.ClusterVersion()
+	targetVersion := semver.Must(semver.NewVersion(r.Version))
+	targetVersion = &semver.Version{Major: targetVersion.Major, Minor: targetVersion.Minor}
+	resp := &pb.DowngradeResponse{}
+	switch r.Action {
+	case pb.DowngradeRequest_VALIDATE:
+		resp.Version = cv.String()
+		if membership.IsOneMinorVersionDiff(cv, targetVersion) {
+			resp.Status = true
+		} else {
+			resp.Status = false
+		}
+		return resp, nil
+	case pb.DowngradeRequest_DOWNGRADE:
+
+	case pb.DowngradeRequest_CANCEL:
+	}
+}
+
 type authMaintenanceServer struct {
 	*maintenanceServer
 	ag AuthGetter
@@ -257,4 +280,8 @@ func (ams *authMaintenanceServer) Status(ctx context.Context, ar *pb.StatusReque
 
 func (ams *authMaintenanceServer) MoveLeader(ctx context.Context, tr *pb.MoveLeaderRequest) (*pb.MoveLeaderResponse, error) {
 	return ams.maintenanceServer.MoveLeader(ctx, tr)
+}
+
+func (ams *authMaintenanceServer) Downgrade(ctx context.Context, r *pb.DowngradeRequest) (*pb.DowngradeResponse, error) {
+	return ams.maintenanceServer.Downgrade(ctx, r)
 }

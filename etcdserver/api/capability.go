@@ -17,6 +17,7 @@ package api
 import (
 	"sync"
 
+	"go.etcd.io/etcd/etcdserver/api/membership"
 	"go.etcd.io/etcd/version"
 	"go.uber.org/zap"
 
@@ -58,14 +59,14 @@ func init() {
 	}
 }
 
-// UpdateCapability updates the enabledMap when the cluster version increases.
+// UpdateCapability updates the enabledMap when the cluster version changes.
 func UpdateCapability(lg *zap.Logger, v *semver.Version) {
 	if v == nil {
 		// if recovered but version was never set by cluster
 		return
 	}
 	enableMapMu.Lock()
-	if curVersion != nil && !curVersion.LessThan(*v) {
+	if curVersion != nil && !membership.IsOneMinorVersionDiff(v, curVersion) {
 		enableMapMu.Unlock()
 		return
 	}
