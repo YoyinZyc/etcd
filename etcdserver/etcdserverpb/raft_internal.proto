@@ -58,6 +58,8 @@ message InternalRaftRequest {
   AuthRoleGetRequest auth_role_get = 1202;
   AuthRoleGrantPermissionRequest auth_role_grant_permission = 1203;
   AuthRoleRevokePermissionRequest auth_role_revoke_permission = 1204;
+
+  ClusterInfoChangeRequest  cluster_info_change = 1300;
 }
 
 message EmptyResponse {
@@ -72,4 +74,18 @@ message InternalAuthenticateRequest {
 
   // simple_token is generated in API layer (etcdserver/v3_server.go)
   string simple_token = 3;
+}
+
+enum ClusterInfoType {
+  ClusterVersion = 0;
+}
+
+message ClusterInfoChangeRequest {
+  // Type is cluster info type to change
+  ClusterInfoType type = 1;
+  // Value is updated value of specific type
+  bytes value = 2;
+}
+
+message ClusterInfoChangeResponse {
 }

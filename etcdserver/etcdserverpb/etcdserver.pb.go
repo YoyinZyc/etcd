@@ -16,6 +16,8 @@
 		InternalRaftRequest
 		EmptyResponse
 		InternalAuthenticateRequest
+		ClusterInfoChangeRequest
+		ClusterInfoChangeResponse
 		ResponseHeader
 		RangeRequest
 		RangeResponse
