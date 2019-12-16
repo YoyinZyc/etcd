@@ -22,6 +22,7 @@ import (
 	"go.etcd.io/etcd/etcdserver/api/v2store"
 	"go.etcd.io/etcd/mvcc/backend"
 	"go.etcd.io/etcd/pkg/types"
+	"go.uber.org/zap"
 
 	"github.com/coreos/go-semver/semver"
 )
@@ -75,6 +76,20 @@ func mustSaveClusterVersionToBackend(be backend.Backend, ver *semver.Version) {
 	tx.UnsafePut(clusterBucketName, ckey, []byte(ver.String()))
 }
 
+func mustSaveDowngradeToBackend(lg *zap.Logger, be backend.Backend, downgrade *DowngradeInfo) {
+	dkey := backendDowngradeKey()
+	dvalue, err := json.Marshal(downgrade)
+	if err != nil {
+		if lg != nil {
+			lg.Panic("failed to marshal downgrade information", zap.Error(err))
+		}
+	}
+	tx := be.BatchTx()
+	tx.Lock()
+	defer tx.Unlock()
+	tx.UnsafePut(clusterBucketName, dkey, dvalue)
+}
+
 func mustSaveMemberToStore(s v2store.Store, m *Member) {
 	b, err := json.Marshal(m.RaftAttributes)
 	if err != nil {
@@ -123,6 +138,123 @@ func mustSaveClusterVersionToStore(s v2store.Store, ver *semver.Version) {
 	}
 }
 
+func downgradeInfoFromBackend(lg *zap.Logger, be backend.Backend) *DowngradeInfo {
+	dkey := backendDowngradeKey()
+	if be != nil {
+		tx := be.ReadTx()
+		tx.Lock()
+		defer tx.Unlock()
+		keys, vals := tx.UnsafeRange(clusterBucketName, dkey, nil, 0)
+		if len(keys) == 0 {
+			return nil
+		}
+
+		if len(keys) != 1 {
+			if lg != nil {
+				lg.Panic(
+					"unexpected number of keys when getting cluster version from backend",
+					zap.Int("number-of-key", len(keys)),
+				)
+			}
+		}
+		var d DowngradeInfo
+		if err := json.Unmarshal(vals[0], &d); err != nil {
+			if lg != nil {
+				lg.Panic("failed to unmarshal downgrade information", zap.Error(err))
+			}
+		}
+		return &d
+	}
+	return nil
+}
+
+func clusterVersionFromBackend(lg *zap.Logger, be backend.Backend) *semver.Version {
+	ckey := backendClusterVersionKey()
+	tx := be.ReadTx()
+	tx.RLock()
+	defer tx.RUnlock()
+	keys, vals := tx.UnsafeRange(clusterBucketName, ckey, nil, 0)
+	if len(keys) == 0 {
+		return nil
+	}
+	if len(keys) != 1 {
+		if lg != nil {
+			lg.Panic(
+				"unexpected number of keys when getting cluster version from backend",
+				zap.Int("number-of-key", len(keys)),
+			)
+		}
+	}
+	return semver.Must(semver.NewVersion(string(vals[0])))
+}
+
+func membersFromStore(lg *zap.Logger, st v2store.Store) (map[types.ID]*Member, map[types.ID]bool) {
+	members := make(map[types.ID]*Member)
+	removed := make(map[types.ID]bool)
+	e, err := st.Get(StoreMembersPrefix, true, true)
+	if err != nil {
+		if isKeyNotFound(err) {
+			return members, removed
+		}
+		if lg != nil {
+			lg.Panic("failed to get members from store", zap.String("path", StoreMembersPrefix), zap.Error(err))
+		} else {
+			plog.Panicf("get storeMembers should never fail: %v", err)
+		}
+	}
+	for _, n := range e.Node.Nodes {
+		var m *Member
+		m, err = nodeToMember(n)
+		if err != nil {
+			if lg != nil {
+				lg.Panic("failed to nodeToMember", zap.Error(err))
+			} else {
+				plog.Panicf("nodeToMember should never fail: %v", err)
+			}
+		}
+		members[m.ID] = m
+	}
+
+	e, err = st.Get(storeRemovedMembersPrefix, true, true)
+	if err != nil {
+		if isKeyNotFound(err) {
+			return members, removed
+		}
+		if lg != nil {
+			lg.Panic(
+				"failed to get removed members from store",
+				zap.String("path", storeRemovedMembersPrefix),
+				zap.Error(err),
+			)
+		} else {
+			plog.Panicf("get storeRemovedMembers should never fail: %v", err)
+		}
+	}
+	for _, n := range e.Node.Nodes {
+		removed[MustParseMemberIDFromKey(n.Key)] = true
+	}
+	return members, removed
+}
+
+func clusterVersionFromStore(lg *zap.Logger, st v2store.Store) *semver.Version {
+	e, err := st.Get(path.Join(storePrefix, "version"), false, false)
+	if err != nil {
+		if isKeyNotFound(err) {
+			return nil
+		}
+		if lg != nil {
+			lg.Panic(
+				"failed to get cluster version from store",
+				zap.String("path", path.Join(storePrefix, "version")),
+				zap.Error(err),
+			)
+		} else {
+			plog.Panicf("unexpected error (%v) when getting cluster version from store", err)
+		}
+	}
+	return semver.Must(semver.NewVersion(*e.Node.Value))
+}
+
 // nodeToMember builds member from a key value node.
 // the child nodes of the given node MUST be sorted by key.
 func nodeToMember(n *v2store.NodeExtern) (*Member, error) {
@@ -159,6 +291,9 @@ func backendClusterVersionKey() []byte {
 	return []byte("clusterVersion")
 }
 
+func backendDowngradeKey() []byte {
+	return []byte("downgrade")
+}
 func mustCreateBackendBuckets(be backend.Backend) {
 	tx := be.BatchTx()
 	tx.Lock()

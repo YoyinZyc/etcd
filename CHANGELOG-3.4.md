@@ -9,15 +9,30 @@ The minimum recommended etcd versions to run in **production** are 3.1.11+, 3.2.
 <hr>
 
 
-## [v3.4.2](https://github.com/etcd-io/etcd/releases/tag/v3.4.2) (2019 TBD)
+## [v3.4.4](https://github.com/etcd-io/etcd/releases/tag/v3.4.4) (2020 TBD)
 
-See [code changes](https://github.com/etcd-io/etcd/compare/v3.4.1...v3.4.2) and [v3.4 upgrade guide](https://github.com/etcd-io/etcd/blob/master/Documentation/upgrades/upgrade_3_4.md) for any breaking changes.
+See [code changes](https://github.com/etcd-io/etcd/compare/v3.4.3...v3.4.4) and [v3.4 upgrade guide](https://github.com/etcd-io/etcd/blob/master/Documentation/upgrades/upgrade_3_4.md) for any breaking changes.
 
 **Again, before running upgrades from any previous release, please make sure to read change logs below and [v3.4 upgrade guide](https://github.com/etcd-io/etcd/blob/master/Documentation/upgrades/upgrade_3_4.md).**
 
-### Dependency
+### Metrics, Monitoring
 
-- Upgrade [`google.golang.org/grpc`](https://github.com/grpc/grpc-go/releases) from [**`v1.23.1`**](https://github.com/grpc/grpc-go/releases/tag/v1.23.1) to [**`v1.24.0`**](https://github.com/grpc/grpc-go/releases/tag/v1.24.0).
+See [List of metrics](https://github.com/etcd-io/etcd/tree/master/Documentation/metrics) for all metrics per release.
+
+Note that any `etcd_debugging_*` metrics are experimental and subject to change.
+
+- Add [`etcd_debugging_mvcc_total_put_size_in_bytes`](https://github.com/etcd-io/etcd/pull/11374) Prometheus metric.
+- Fix bug where [etcd_debugging_mvcc_db_compaction_keys_total is always 0](https://github.com/etcd-io/etcd/pull/11400).
+
+### Auth
+
+- Fix [NoPassword check when adding user through GRPC gateway](https://github.com/etcd-io/etcd/pull/11418) ([issue#11414](https://github.com/etcd-io/etcd/issues/11414))
+
+## [v3.4.3](https://github.com/etcd-io/etcd/releases/tag/v3.4.3) (2019-10-24)
+
+See [code changes](https://github.com/etcd-io/etcd/compare/v3.4.2...v3.4.3) and [v3.4 upgrade guide](https://github.com/etcd-io/etcd/blob/master/Documentation/upgrades/upgrade_3_4.md) for any breaking changes.
+
+**Again, before running upgrades from any previous release, please make sure to read change logs below and [v3.4 upgrade guide](https://github.com/etcd-io/etcd/blob/master/Documentation/upgrades/upgrade_3_4.md).**
 
 ### Metrics, Monitoring
 
@@ -26,6 +41,21 @@ See [List of metrics](https://github.com/etcd-io/etcd/tree/master/Documentation/
 Note that any `etcd_debugging_*` metrics are experimental and subject to change.
 
 - Change [`etcd_cluster_version`](https://github.com/etcd-io/etcd/pull/11254) Prometheus metrics to include only major and minor version.
+
+### Go
+
+- Compile with [*Go 1.12.12*](https://golang.org/doc/devel/release.html#go1.12).
+
+
+## [v3.4.2](https://github.com/etcd-io/etcd/releases/tag/v3.4.2) (2019-10-11)
+
+See [code changes](https://github.com/etcd-io/etcd/compare/v3.4.1...v3.4.2) and [v3.4 upgrade guide](https://github.com/etcd-io/etcd/blob/master/Documentation/upgrades/upgrade_3_4.md) for any breaking changes.
+
+**Again, before running upgrades from any previous release, please make sure to read change logs below and [v3.4 upgrade guide](https://github.com/etcd-io/etcd/blob/master/Documentation/upgrades/upgrade_3_4.md).**
+
+### Dependency
+
+- Upgrade [`google.golang.org/grpc`](https://github.com/grpc/grpc-go/releases) from [**`v1.23.1`**](https://github.com/grpc/grpc-go/releases/tag/v1.23.1) to [**`v1.24.0`**](https://github.com/grpc/grpc-go/releases/tag/v1.24.0).
 
 ### etcdctl v3
 

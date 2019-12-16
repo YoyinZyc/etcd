@@ -20,16 +20,17 @@ import (
 	"encoding/binary"
 	"time"
 
+	"github.com/coreos/go-semver/semver"
+	"github.com/gogo/protobuf/proto"
 	"go.etcd.io/etcd/auth"
 	"go.etcd.io/etcd/etcdserver/api/membership"
+	"go.etcd.io/etcd/etcdserver/api/membership/membershippb"
 	pb "go.etcd.io/etcd/etcdserver/etcdserverpb"
 	"go.etcd.io/etcd/lease"
 	"go.etcd.io/etcd/lease/leasehttp"
 	"go.etcd.io/etcd/mvcc"
 	"go.etcd.io/etcd/pkg/traceutil"
 	"go.etcd.io/etcd/raft"
-
-	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
 )
 
@@ -802,4 +803,106 @@ func (s *EtcdServer) AuthInfoFromCtx(ctx context.Context) (*auth.AuthInfo, error
 	authInfo = s.AuthStore().AuthInfoFromTLS(ctx)
 	return authInfo, nil
 
+}
+
+func (s *EtcdServer) Downgrade(ctx context.Context, r *pb.DowngradeRequest) (*pb.DowngradeResponse, error) {
+	switch r.Action {
+	case pb.DowngradeRequest_VALIDATE:
+		return s.downgradeValidate(ctx, r.Version)
+	case pb.DowngradeRequest_ENABLE:
+		return s.downgradeEnable(ctx, r)
+	case pb.DowngradeRequest_CANCEL:
+		return s.downgradeCancel(ctx)
+	default:
+		return nil, ErrUnknownDowngradeAction
+	}
+}
+
+func (s *EtcdServer) downgradeValidate(ctx context.Context, v string) (*pb.DowngradeResponse, error) {
+	resp := &pb.DowngradeResponse{}
+
+	targetVersion, err := changeToTargetVersion(v)
+	if err != nil {
+		return nil, err
+	}
+
+	// do linearized read to avoid using stale downgrade information
+	err = s.linearizableReadNotify(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	cv := s.ClusterVersion()
+	if cv == nil {
+		return nil, ErrClusterVersionUnavailable
+	}
+	resp.Version = cv.String()
+
+	allowedTargetVersion := semver.Version{Major: cv.Major, Minor: cv.Minor - 1}
+	if !targetVersion.Equal(allowedTargetVersion) {
+		err = ErrInvalidDowngradeTargetVersion
+		return nil, err
+	}
+
+	downgradeInfo := s.cluster.DowngradeInfo()
+
+	if downgradeInfo.Enabled {
+		// Todo: return the downgrade status along with the error msg
+		return resp, ErrIsDowngrading
+	}
+	return resp, nil
+}
+
+func (s *EtcdServer) downgradeEnable(ctx context.Context, r *pb.DowngradeRequest) (*pb.DowngradeResponse, error) {
+	// validate downgrade capability before starting downgrade
+	v := r.Version
+	if resp, err := s.downgradeValidate(ctx, v); err != nil {
+		return resp, err
+	}
+	targetVersion, err := changeToTargetVersion(v)
+	if err != nil {
+		return nil, err
+	}
+
+	raftRequest := membershippb.DowngradeInfoSetRequest{Enabled: true, Ver: targetVersion.String()}
+	_, err = s.raftRequest(ctx, pb.InternalRaftRequest{DowngradeInfoSet: &raftRequest})
+	if err != nil {
+		return nil, err
+	}
+	resp := pb.DowngradeResponse{Version: s.ClusterVersion().String()}
+	return &resp, nil
+}
+
+func (s *EtcdServer) downgradeCancel(ctx context.Context) (*pb.DowngradeResponse, error) {
+	// do linearized read to avoid using stale downgrade information
+	if err := s.linearizableReadNotify(ctx); err != nil {
+		return nil, err
+	}
+
+	downgradeInfo := s.cluster.DowngradeInfo()
+	if !downgradeInfo.Enabled {
+		return nil, ErrIsNotDowngrading
+	}
+
+	raftRequest := membershippb.DowngradeInfoSetRequest{Enabled: false}
+	_, err := s.raftRequest(ctx, pb.InternalRaftRequest{DowngradeInfoSet: &raftRequest})
+	if err != nil {
+		return nil, err
+	}
+	resp := pb.DowngradeResponse{Version: s.ClusterVersion().String()}
+	return &resp, nil
+}
+
+func changeToTargetVersion(v string) (*semver.Version, error) {
+	targetVersion, err := semver.NewVersion(v)
+	if err != nil {
+		// allow input version format Major.Minor
+		targetVersion, err = semver.NewVersion(v + ".0")
+		if err != nil {
+			return nil, ErrWrongVersionFormat
+		}
+	}
+	// cluster version only keeps major.minor, remove patch version
+	targetVersion = &semver.Version{Major: targetVersion.Major, Minor: targetVersion.Minor}
+	return targetVersion, nil
 }

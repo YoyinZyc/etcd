@@ -15,17 +15,25 @@
 package membership
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"os/exec"
 	"path"
+	"path/filepath"
 	"reflect"
+	"strconv"
 	"testing"
 
+	"github.com/coreos/go-semver/semver"
 	"go.etcd.io/etcd/etcdserver/api/v2store"
 	"go.etcd.io/etcd/pkg/mock/mockstore"
 	"go.etcd.io/etcd/pkg/testutil"
 	"go.etcd.io/etcd/pkg/types"
 	"go.etcd.io/etcd/raft/raftpb"
+	"go.etcd.io/etcd/version"
 
 	"go.uber.org/zap"
 )
@@ -617,7 +625,11 @@ func TestNodeToMember(t *testing.T) {
 }
 
 func newTestCluster(membs []*Member) *RaftCluster {
-	c := &RaftCluster{lg: zap.NewExample(), members: make(map[types.ID]*Member), removed: make(map[types.ID]bool)}
+	c := &RaftCluster{
+		lg:      zap.NewExample(),
+		members: make(map[types.ID]*Member),
+		removed: make(map[types.ID]bool),
+	}
 	for _, m := range membs {
 		c.members[m.ID] = m
 	}
@@ -857,5 +869,295 @@ func TestIsReadyToRemoveVotingMember(t *testing.T) {
 		if got := c.IsReadyToRemoveVotingMember(tt.removeID); got != tt.want {
 			t.Errorf("%d: isReadyToAddNewMember returned %t, want %t", i, got, tt.want)
 		}
+	}
+}
+
+func TestMustDetectDowngrade(t *testing.T) {
+	lv := semver.Must(semver.NewVersion(version.Version))
+	lv = &semver.Version{Major: lv.Major, Minor: lv.Minor}
+	oneMinorHigher := &semver.Version{Major: lv.Major, Minor: lv.Minor + 1}
+	oneMinorLower := &semver.Version{Major: lv.Major, Minor: lv.Minor - 1}
+	downgradeEnabledHigherVersion := &DowngradeInfo{Enabled: true, TargetVersion: oneMinorHigher}
+	downgradeEnabledEqualVersion := &DowngradeInfo{Enabled: true, TargetVersion: lv}
+	downgradeEnabledLowerVersion := &DowngradeInfo{Enabled: true, TargetVersion: oneMinorLower}
+	downgradeDisabled := &DowngradeInfo{Enabled: false}
+
+	tests := []struct {
+		name           string
+		clusterVersion *semver.Version
+		downgrade      *DowngradeInfo
+		success        bool
+		message        string
+	}{
+		{
+			"Succeeded when downgrade is disabled and cluster version is nil",
+			nil,
+			downgradeDisabled,
+			true,
+			"",
+		},
+		{
+			"Succeeded when downgrade is disabled and cluster version is one minor lower",
+			oneMinorLower,
+			downgradeDisabled,
+			true,
+			"",
+		},
+		{
+			"Failed when downgrade is disabled and server version is lower than determined cluster version ",
+			oneMinorHigher,
+			downgradeDisabled,
+			false,
+			"invalid downgrade; server version is lower than determined cluster version",
+		},
+		{
+			"Succeeded when downgrade is disabled and server version is cluster version",
+			lv,
+			downgradeDisabled,
+			true,
+			"",
+		},
+		{
+			"Succeeded when downgrade is enabled and cluster version is nil",
+			nil,
+			downgradeEnabledLowerVersion,
+			true,
+			"",
+		},
+		{
+			"Failed when downgrade is enabled and local version is out of range and cluster version is nil",
+			nil,
+			downgradeEnabledHigherVersion,
+			false,
+			"invalid downgrade; server version is not allowed to join when downgrade is enabled",
+		},
+		{
+			"Succeeded when downgrade is enabled and server version is cluster version",
+			lv,
+			downgradeEnabledLowerVersion,
+			true,
+			"cluster is downgrading to target version",
+		},
+		{
+			"Failed when downgrade is enabled and local version is out of range",
+			lv,
+			downgradeEnabledHigherVersion,
+			false,
+			"invalid downgrade; server version is not allowed to join when downgrade is enabled",
+		},
+		{
+			"Succeeded when downgrade is enabled and server version is target version",
+			lv,
+			downgradeEnabledEqualVersion,
+			true,
+			"cluster is downgrading to target version",
+		},
+	}
+
+	if os.Getenv("DETECT_DOWNGRADE") != "" {
+		i := os.Getenv("DETECT_DOWNGRADE")
+		iint, _ := strconv.Atoi(i)
+		logPath := filepath.Join(os.TempDir(), fmt.Sprintf("test-log-must-detect-downgrade-%v", iint))
+
+		lcfg := zap.NewProductionConfig()
+		lcfg.OutputPaths = []string{logPath}
+		lcfg.ErrorOutputPaths = []string{logPath}
+		lg, _ := lcfg.Build()
+
+		mustDetectDowngrade(lg, tests[iint].clusterVersion, tests[iint].downgrade)
+		return
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logPath := filepath.Join(os.TempDir(), fmt.Sprintf("test-log-must-detect-downgrade-%d", i))
+			defer os.RemoveAll(logPath)
+
+			cmd := exec.Command(os.Args[0], "-test.run=TestMustDetectDowngrade")
+			cmd.Env = append(os.Environ(), fmt.Sprintf("DETECT_DOWNGRADE=%d", i))
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+
+			errCmd := cmd.Wait()
+
+			data, err := ioutil.ReadFile(logPath)
+			if err == nil {
+				if !bytes.Contains(data, []byte(tt.message)) {
+					t.Errorf("Expected to find %v in log", tt.message)
+				}
+			} else {
+				t.Fatal(err)
+			}
+
+			if !tt.success {
+				e, ok := errCmd.(*exec.ExitError)
+				if !ok || e.Success() {
+					t.Errorf("Expected exit with status 1; Got %v", err)
+				}
+			}
+
+			if tt.success && errCmd != nil {
+				t.Errorf("Expected not failure; Got %v", errCmd)
+			}
+		})
+	}
+}
+
+func TestIsVersionChangable(t *testing.T) {
+	v0 := semver.Must(semver.NewVersion("2.4.0"))
+	v1 := semver.Must(semver.NewVersion("3.4.0"))
+	v2 := semver.Must(semver.NewVersion("3.5.0"))
+	v3 := semver.Must(semver.NewVersion("3.5.1"))
+	v4 := semver.Must(semver.NewVersion("3.6.0"))
+
+	tests := []struct {
+		name           string
+		currentVersion *semver.Version
+		localVersion   *semver.Version
+		expectedResult bool
+	}{
+		{
+			name:           "Fail when local version is one major higher than cluster version",
+			currentVersion: v0,
+			localVersion:   v1,
+			expectedResult: false,
+		},
+		{
+			name:           "Fail when local version is equal to cluster version",
+			currentVersion: v1,
+			localVersion:   v1,
+			expectedResult: false,
+		},
+		{
+			name:           "Succeed when local version is one minor higher than cluster version",
+			currentVersion: v1,
+			localVersion:   v2,
+			expectedResult: true,
+		},
+		{
+			name:           "Succeed when local version is two minor higher than cluster version",
+			currentVersion: v1,
+			localVersion:   v4,
+			expectedResult: true,
+		},
+		{
+			name:           "Fail when local version is one patch higher than cluster version",
+			currentVersion: v2,
+			localVersion:   v3,
+			expectedResult: false,
+		},
+		{
+			name:           "Succeed when local version is one minor lower than cluster version",
+			currentVersion: v2,
+			localVersion:   v1,
+			expectedResult: true,
+		},
+		{
+			name:           "Succeed when local version is one minor and one patch lower than cluster version",
+			currentVersion: v3,
+			localVersion:   v1,
+			expectedResult: true,
+		},
+		{
+			name:           "Fail when local version is two minor lower than cluster version",
+			currentVersion: v4,
+			localVersion:   v1,
+			expectedResult: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if ret := IsVersionChangable(tt.currentVersion, tt.localVersion); ret != tt.expectedResult {
+				t.Errorf("Expected %v; Got %v", tt.expectedResult, ret)
+			}
+		})
+	}
+}
+
+func TestGetDowngrade(t *testing.T) {
+	tests := []struct {
+		name                  string
+		cluster               *RaftCluster
+		expectedEnabled       bool
+		expectedTargetVersion *semver.Version
+	}{
+
+		{
+			"When downgradeInfo is empty",
+			&RaftCluster{},
+			false,
+			nil,
+		},
+		{
+			"When downgrade is disabled",
+			&RaftCluster{downgradeInfo: &DowngradeInfo{Enabled: false}},
+			false,
+			nil,
+		},
+		{
+			"When downgrade is enabled",
+			&RaftCluster{downgradeInfo: &DowngradeInfo{Enabled: true, TargetVersion: semver.Must(semver.NewVersion("3.4.0"))}},
+			true,
+			semver.Must(semver.NewVersion("3.4.0")),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := tt.cluster.DowngradeInfo()
+			if d.Enabled != tt.expectedEnabled {
+				t.Errorf("Expected %v; Got %v", tt.expectedEnabled, d.Enabled)
+			}
+
+			if tt.expectedTargetVersion == nil {
+				if d.TargetVersion != nil {
+					t.Errorf("Expected nil; Got %v", d.TargetVersion)
+				}
+			} else {
+				if !tt.expectedTargetVersion.Equal(*d.TargetVersion) {
+					t.Errorf("Expected %v; Got %v", tt.expectedTargetVersion, d.TargetVersion)
+				}
+			}
+		})
+	}
+}
+
+func TestIsValidDowngrade(t *testing.T) {
+	lv := semver.Must(semver.NewVersion(version.Version))
+	lv = &semver.Version{Major: lv.Major, Minor: lv.Minor}
+	tv := &semver.Version{Major: lv.Major, Minor: lv.Minor - 1}
+	tests := []struct {
+		name           string
+		targetVersion  *semver.Version
+		localVersion   *semver.Version
+		expectedResult bool
+	}{
+		{
+			name:           "When local version is equal to target version",
+			targetVersion:  tv,
+			localVersion:   lv,
+			expectedResult: true,
+		},
+		{
+			name:           "When local version is one minor version higher than target version",
+			targetVersion:  tv,
+			localVersion:   lv,
+			expectedResult: true,
+		},
+		{
+			name:           "When local version is lower than target version",
+			targetVersion:  tv,
+			localVersion:   &semver.Version{Major: tv.Major, Minor: tv.Minor - 1},
+			expectedResult: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if ret := isValidDowngrade(tt.targetVersion, tt.localVersion); ret != tt.expectedResult {
+				t.Errorf("Expected %v; Got %v", tt.expectedResult, ret)
+			}
+		})
 	}
 }

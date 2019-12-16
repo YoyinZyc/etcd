@@ -64,6 +64,7 @@ Note that any `etcd_debugging_*` metrics are experimental and subject to change.
 - Add [`etcd_debugging_mvcc_current_revision`](https://github.com/etcd-io/etcd/pull/11126) Prometheus metric.
 - Add [`etcd_debugging_mvcc_compact_revision`](https://github.com/etcd-io/etcd/pull/11126) Prometheus metric.
 - Change [`etcd_cluster_version`](https://github.com/etcd-io/etcd/pull/11254) Prometheus metrics to include only major and minor version.
+- Add [`etcd_debugging_mvcc_total_put_size_in_bytes`](https://github.com/etcd-io/etcd/pull/11374) Prometheus metric.
 
 ### etcd server
 
@@ -79,6 +80,7 @@ Note that any `etcd_debugging_*` metrics are experimental and subject to change.
 - [`etcd --backend-bbolt-freelist-type`] flag is now stable.
   - `etcd --experimental-backend-bbolt-freelist-type` has been deprecated.
 - Support [rollback/downgrade](TODO).
+- Deprecate v2 apply on cluster version. [Use v3 request to set cluster version and recover cluster version from v3 backend](https://github.com/etcd-io/etcd/pull/11427).
 
 ### Package `embed`
 
@@ -99,6 +101,10 @@ Note that any `etcd_debugging_*` metrics are experimental and subject to change.
 - [gRPC gateway](https://github.com/grpc-ecosystem/grpc-gateway) only supports [`/v3`](TODO) endpoint.
   - Deprecated [`/v3beta`](https://github.com/etcd-io/etcd/pull/9298).
   - `curl -L http://localhost:2379/v3beta/kv/put -X POST -d '{"key": "Zm9v", "value": "YmFy"}'` does work in v3.5. Use `curl -L http://localhost:2379/v3/kv/put -X POST -d '{"key": "Zm9v", "value": "YmFy"}'` instead.
+
+### Auth
+
+- Fix [NoPassword check when adding user through GRPC gateway](https://github.com/etcd-io/etcd/pull/11418) ([issue#11414](https://github.com/etcd-io/etcd/issues/11414))
 
 ### Dependency
 

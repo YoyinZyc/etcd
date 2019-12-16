@@ -31,6 +31,7 @@ type (
 	StatusResponse     pb.StatusResponse
 	HashKVResponse     pb.HashKVResponse
 	MoveLeaderResponse pb.MoveLeaderResponse
+	DowngradeResponse  pb.DowngradeResponse
 )
 
 type Maintenance interface {
@@ -65,6 +66,23 @@ type Maintenance interface {
 	// MoveLeader requests current leader to transfer its leadership to the transferee.
 	// Request must be made to the leader.
 	MoveLeader(ctx context.Context, transfereeID uint64) (*MoveLeaderResponse, error)
+
+	// DowngradeValidate requests validation of the downgrade request against the target version.
+	// Version should follow the version format "Major.Minor.Patch"(e.g. 3.4.0).
+	// The cluster can only be downgraded to one minor version lower.
+	// All other input version will fail the validation.
+	DowngradeValidate(ctx context.Context, version string) (*DowngradeResponse, error)
+
+	// DowngradeEnable requests to downgrade the current cluster version to target version.
+	// It will first validate the target version.
+	// After all servers have been downgraded to target version,
+	// the downgrade will reset disabled automatically.
+	// Redundant DowngradeEnable will error out.
+	DowngradeEnable(ctx context.Context, version string) (*DowngradeResponse, error)
+
+	// DowngradeCancel cancels the current downgrade job.
+	// If there is no current downgrade job, the request will return error message.
+	DowngradeCancel(ctx context.Context) (*DowngradeResponse, error)
 }
 
 type maintenance struct {
@@ -212,6 +230,47 @@ func (m *maintenance) Snapshot(ctx context.Context) (io.ReadCloser, error) {
 		pw.Close()
 	}()
 	return &snapshotReadCloser{ctx: ctx, ReadCloser: pr}, nil
+}
+
+func (m *maintenance) DowngradeValidate(ctx context.Context, version string) (*DowngradeResponse, error) {
+	req := &pb.DowngradeRequest{
+		Action:  pb.DowngradeRequest_VALIDATE,
+		Version: version,
+	}
+
+	resp, err := m.remote.Downgrade(ctx, req)
+	if err != nil {
+		return nil, toErr(ctx, err)
+	}
+
+	return (*DowngradeResponse)(resp), nil
+}
+
+func (m *maintenance) DowngradeEnable(ctx context.Context, version string) (*DowngradeResponse, error) {
+	req := &pb.DowngradeRequest{
+		Action:  pb.DowngradeRequest_ENABLE,
+		Version: version,
+	}
+
+	resp, err := m.remote.Downgrade(ctx, req)
+	if err != nil {
+		return nil, toErr(ctx, err)
+	}
+
+	return (*DowngradeResponse)(resp), nil
+}
+
+func (m *maintenance) DowngradeCancel(ctx context.Context) (*DowngradeResponse, error) {
+	req := &pb.DowngradeRequest{
+		Action: pb.DowngradeRequest_CANCEL,
+	}
+
+	resp, err := m.remote.Downgrade(ctx, req)
+	if err != nil {
+		return nil, toErr(ctx, err)
+	}
+
+	return (*DowngradeResponse)(resp), nil
 }
 
 type snapshotReadCloser struct {

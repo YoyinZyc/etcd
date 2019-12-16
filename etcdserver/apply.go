@@ -21,7 +21,11 @@ import (
 	"sort"
 	"time"
 
+	"github.com/coreos/go-semver/semver"
 	"go.etcd.io/etcd/auth"
+	"go.etcd.io/etcd/etcdserver/api"
+	"go.etcd.io/etcd/etcdserver/api/membership"
+	"go.etcd.io/etcd/etcdserver/api/membership/membershippb"
 	pb "go.etcd.io/etcd/etcdserver/etcdserverpb"
 	"go.etcd.io/etcd/lease"
 	"go.etcd.io/etcd/mvcc"
@@ -45,6 +49,13 @@ type applyResult struct {
 	// Compaction requests.
 	physc <-chan struct{}
 	trace *traceutil.Trace
+}
+
+// applierV3Internal is the interface for processing internal V3 raft request
+type applierV3Internal interface {
+	ClusterVersionSet(r *membershippb.ClusterVersionSetRequest)
+	ClusterMemberAttrSet(r *membershippb.ClusterMemberAttrSetRequest)
+	DowngradeInfoSet(r *membershippb.DowngradeInfoSetRequest)
 }
 
 // applierV3 is the interface for processing V3 raft messages
@@ -101,6 +112,11 @@ func (s *EtcdServer) newApplierV3Backend() applierV3 {
 	base.checkRange = func(rv mvcc.ReadView, req *pb.RequestOp) error {
 		return base.checkRequestRange(rv, req)
 	}
+	return base
+}
+
+func (s *EtcdServer) newApplierV3Internal() applierV3Internal {
+	base := &applierV3backend{s: s}
 	return base
 }
 
@@ -170,6 +186,12 @@ func (a *applierV3backend) Apply(r *pb.InternalRaftRequest) *applyResult {
 		ar.resp, ar.err = a.s.applyV3.UserList(r.AuthUserList)
 	case r.AuthRoleList != nil:
 		ar.resp, ar.err = a.s.applyV3.RoleList(r.AuthRoleList)
+	case r.ClusterVersionSet != nil:
+		a.s.applyV3Internal.ClusterVersionSet(r.ClusterVersionSet)
+	case r.ClusterMemberAttrSet != nil:
+		a.s.applyV3Internal.ClusterMemberAttrSet(r.ClusterMemberAttrSet)
+	case r.DowngradeInfoSet != nil:
+		a.s.applyV3Internal.DowngradeInfoSet(r.DowngradeInfoSet)
 	default:
 		panic("not implemented")
 	}
@@ -831,6 +853,31 @@ func (a *applierV3backend) RoleList(r *pb.AuthRoleListRequest) (*pb.AuthRoleList
 		resp.Header = newHeader(a.s)
 	}
 	return resp, err
+}
+
+func (a *applierV3backend) ClusterVersionSet(r *membershippb.ClusterVersionSetRequest) {
+	a.s.cluster.SetVersion(semver.Must(semver.NewVersion(r.Ver)), api.UpdateCapability)
+}
+
+func (a *applierV3backend) ClusterMemberAttrSet(r *membershippb.ClusterMemberAttrSetRequest) {
+	a.s.cluster.UpdateAttributes(
+		types.ID(r.Member_ID),
+		membership.Attributes{
+			Name:       r.MemberAttributes.Name,
+			ClientURLs: r.MemberAttributes.ClientUrls,
+		},
+	)
+}
+
+func (a *applierV3backend) DowngradeInfoSet(r *membershippb.DowngradeInfoSetRequest) {
+	var d membership.DowngradeInfo
+	if r.Enabled {
+		v := r.Ver
+		d = membership.DowngradeInfo{Enabled: true, TargetVersion: semver.Must(semver.NewVersion(v))}
+	} else {
+		d = membership.DowngradeInfo{Enabled: false}
+	}
+	a.s.cluster.SetDowngradeInfo(&d)
 }
 
 type quotaApplierV3 struct {
